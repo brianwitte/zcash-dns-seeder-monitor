@@ -1,3 +1,4 @@
 [submodule "zebra"]
 	path = zebra
 	url = git@github.com:buoy49/zebra.git
+	branch = dns-seeder-monitor
