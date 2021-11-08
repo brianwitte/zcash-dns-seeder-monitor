@@ -1,34 +1,32 @@
-use std::cmp::min;
-use std::collections::HashSet;
-use std::error::Error;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    cmp::min,
+    collections::HashSet,
+    error::Error,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 
 use chrono::{TimeZone, Utc};
-use futures::{
-    channel::{mpsc, oneshot},
-    future, FutureExt, SinkExt, StreamExt,
-};
-use futures::lock::Mutex;
-use tokio::{net::TcpStream, sync::broadcast, task::JoinError, time::timeout};
+use futures::{SinkExt, StreamExt};
+use tokio::{net::TcpStream, time::timeout};
 use tokio_util::codec::Framed;
-use tracing::{Level, span, Span};
-use tracing::debug;
-use tracing::info;
+use tracing::{debug, info, Level};
 use tracing_subscriber::FmtSubscriber;
-
-use zebra_network::{
-    protocol::external::{
-        Message,
-        Codec,
-        types::{Nonce, Version, PeerServices},
-    },
-    peer::{ConnectedAddr, HandshakeError},
-    Config, constants,
+use zebra_chain::{
+    block,
+    chain_tip::{ChainTip, NoChainTip},
+    parameters::Network,
 };
-
-use zebra_chain::{block, chain_tip::{ChainTip, NoChainTip}, parameters::Network};
+use zebra_network::{
+    Config,
+    constants,
+    peer::HandshakeError,
+    protocol::external::{
+        Codec,
+        Message, types::{Nonce, PeerServices, Version},
+    },
+};
 
 /// Negotiate the Zcash network protocol version with the remote peer
 /// at `connected_addr`, using the connection `peer_conn`.
