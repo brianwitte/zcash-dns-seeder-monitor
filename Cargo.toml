@@ -11,6 +11,7 @@ tracing = "0.1.29"
 tracing-subscriber = "0.3.1"
 log = "0.4.14"
 chrono = "0.4.19"
+trust-dns-resolver = "0.20.3"
 
 # use zebra-network and zebra-chain modules as client library for peer handshake and version validation
 zebra-network = { path = "zebra/zebra-network"}
