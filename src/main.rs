@@ -13,6 +13,13 @@ use tokio::{net::TcpStream, time::timeout};
 use tokio_util::codec::Framed;
 use tracing::{debug, info, Level};
 use tracing_subscriber::FmtSubscriber;
+use trust_dns_resolver::{TokioAsyncResolver, TokioHandle};
+use trust_dns_resolver::config::*;
+use trust_dns_resolver::error::ResolveError;
+use trust_dns_resolver::lookup::{Ipv4Lookup, Lookup};
+use trust_dns_resolver::lookup_ip::LookupIp;
+use trust_dns_resolver::proto::error::ProtoErrorKind::LabelOverlapsWithOther;
+
 use zebra_chain::{
     block,
     chain_tip::{ChainTip, NoChainTip},
@@ -124,7 +131,8 @@ pub async fn negotiate_version(
             "disconnecting from peer with obsolete network protocol version"
         );
         // Disconnect if peer is using an obsolete version.
-        Err(HandshakeError::ObsoleteVersion(remote_version))?;
+        //Err(HandshakeError::ObsoleteVersion(remote_version))?;
+        debug!(?remote_version, "NODE IS RUNNING AN OBSOLETE VERSION")
     } else {
         let negotiated_version = min(constants::CURRENT_NETWORK_PROTOCOL_VERSION, remote_version);
 
@@ -151,54 +159,66 @@ pub async fn negotiate_version(
 
     Ok((remote_version, remote_services, remote_canonical_addr))
 }
+async fn resolve_addresses_from_dns_seeders () -> Result<Ipv4Lookup, ResolveError> {
+    let mut resolver = TokioAsyncResolver::new(ResolverConfig::default(), ResolverOpts::default(), TokioHandle).unwrap();
+    let mut response = resolver.ipv4_lookup("mainnet.seeder.zfnd.org.").await?;
+    let lookup = response;
+    Ok(lookup)
+}
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+fn setup() {
+    if std::env::var("RUST_LIB_BACKTRACE").is_err() {
+        std::env::set_var("RUST_LIB_BACKTRACE", "1")
+    }
 
     let subscriber = FmtSubscriber::builder()
-        // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
-        // will be written to stdout.
-        .with_max_level(Level::DEBUG)
-        // completes the builder.
+        .with_max_level(Level::TRACE)
         .finish();
 
     tracing::subscriber::set_global_default(subscriber)
         .expect("setting default subscriber failed");
+}
 
-    let config = Config {
-        network: Network::Mainnet,
-        ..Config::default()
-    };
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    setup();
 
-    //let connected_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 18233);
-    let connected_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(47, 253, 8, 99)), 8233);
-    let mut tcp_stream = TcpStream::connect(connected_addr).await?;
-    let mut peer_conn = Framed::new(
-        tcp_stream,
-        Codec::builder()
-            .for_network(config.network)
-            .with_metrics_addr_label("this-label-is-not-used".to_string())
-            .finish(),
-    );
-    let nonces = Arc::new(futures::lock::Mutex::new(HashSet::new()));
-    let user_agent = String::from("/MyRustUserAgent/");
-    let our_services = PeerServices::NODE_NETWORK;
-    let relay = false;
-    let latest_chain_tip = NoChainTip;
+    let dns_lookup = resolve_addresses_from_dns_seeders().await?;
+    let records  = dns_lookup.as_lookup().record_iter().map(|i| i.rdata().to_ip_addr().unwrap());
+    for ip in records {
+        debug!(?ip);
+        let config = Config {
+            network: Network::Mainnet,
+            ..Config::default()
+        };
+        let connected_addr = SocketAddr::new(ip, 8233);
+        let mut tcp_stream = TcpStream::connect(connected_addr).await?;
+        let mut peer_conn = Framed::new(
+            tcp_stream,
+            Codec::builder()
+                .for_network(config.network)
+                .with_metrics_addr_label("this-label-is-not-used".to_string())
+                .finish(),
+        );
+        let nonces = Arc::new(futures::lock::Mutex::new(HashSet::new()));
+        let user_agent = String::from("/MyRustUserAgent/");
+        let our_services = PeerServices::NODE_NETWORK;
+        let relay = false;
+        let latest_chain_tip = NoChainTip;
 
-    let (remote_version, remote_services, remote_canonical_addr) = timeout(
-        Duration::from_secs(4),
-        negotiate_version(
-            &mut peer_conn,
-            &connected_addr,
-            config,
-            nonces,
-            user_agent,
-            our_services,
-            relay,
-            latest_chain_tip,
-        ),
-    ).await??;
-
+        let (remote_version, remote_services, remote_canonical_addr) = timeout(
+            Duration::from_secs(4),
+            negotiate_version(
+                &mut peer_conn,
+                &connected_addr,
+                config,
+                nonces,
+                user_agent,
+                our_services,
+                relay,
+                latest_chain_tip,
+            ),
+        ).await??;
+    }
     Ok(())
 }
